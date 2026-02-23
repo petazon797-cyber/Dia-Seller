@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="my">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MLBB Sales Tracker - Working Version</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+    <style>
+        :root { --bg: #0b0e14; --card-bg: #161b22; --neon-blue: #00d2ff; --neon-green: #39ff14; --text: #ffffff; }
+        body { font-family: sans-serif; background-color: var(--bg); color: var(--text); margin: 0; padding: 10px; text-align: center; }
+        .container { max-width: 600px; margin: auto; display: none; padding-top: 20px; }
+        #login-screen { height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        .btn { background: var(--neon-blue); color: #000; border: none; padding: 12px 20px; border-radius: 5px; font-weight: bold; cursor: pointer; width: 100%; margin-top: 10px; }
+        input, select { width: 100%; padding: 10px; margin: 10px 0; border-radius: 5px; border: 1px solid #444; }
+        .dashboard { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 20px 0; }
+        .card { background: var(--card-bg); padding: 15px; border-radius: 10px; border: 1px solid #333; }
+    </style>
+</head>
+<body>
+
+<div id="login-screen">
+    <h2 style="color: var(--neon-blue);">💎 MLBB Sales Tracker 💎</h2>
+    <p>အကောင့်ဝင်ရန် အောက်ကခလုတ်ကို နှိပ်ပါ</p>
+    <button class="btn" style="background:#db4437; color:white;" onclick="login()">Login with Google</button>
+</div>
+
+<div class="container" id="main-container">
+    <div style="display:flex; justify-content: space-between;">
+        <span id="userEmail" style="font-size:12px; color:#888;"></span>
+        <button onclick="logout()" style="background:none; color:red; border:none; cursor:pointer;">Logout</button>
+    </div>
+    
+    <h3 style="color: var(--neon-blue);">အရောင်းစာရင်းသွင်းရန်</h3>
+    
+    <input type="number" id="scRate" placeholder="ယနေ့ Sc Rate (ဥပမာ 75.8)" oninput="updateBuyPrice()">
+    <input type="date" id="saleDate">
+    <select id="packageSelect" onchange="updateBuyPrice()"></select>
+    <input type="number" id="sellPrice" placeholder="ရောင်းဈေး (ကျပ်)">
+    <input type="hidden" id="buyPrice">
+    
+    <button class="btn" onclick="addRecord()">Cloud ပေါ်သို့ သိမ်းမည်</button>
+
+    <div class="dashboard">
+        <div class="card"><h4>ယနေ့အမြတ်</h4><p id="totalProfit" style="color:var(--neon-green)">0</p></div>
+        <div class="card"><h4>စုစုပေါင်းအမြတ်</h4><p id="overallProfit" style="color:var(--neon-green)">0</p></div>
+    </div>
+    
+    <p style="font-size:12px; color:#666;">*စာရင်းများကို အောက်က ဇယားတွင် ကြည့်နိုင်ပါသည်*</p>
+    <div id="tableContent" style="text-align:left; font-size:12px; background:#111; padding:10px; border-radius:5px;"></div>
+</div>
+
+<script>
+    const firebaseConfig = {
+        apiKey: "AIzaSyAe7CMFx0eLZmJ6PGNsvLyAjtude_s",
+        authDomain: "diamond-sales-fcb29.firebaseapp.com",
+        projectId: "diamond-sales-fcb29",
+        storageBucket: "diamond-sales-fcb29.firebasestorage.app",
+        messagingSenderId: "928447803826",
+        appId: "1:928447803826:web:c09e7fc3b50d544b2ab4ab"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    const packages = [
+        { name: "86 Dia", sc: 61.5 }, { name: "172 Dia", sc: 122 }, { name: "257 Dia", sc: 177.5 },
+        { name: "429 Dia", sc: 299.5 }, { name: "Weekly Pass", sc: 76 } // 429 Dia ပြင်ဆင်ပြီး
+    ];
+
+    const sel = document.getElementById('packageSelect');
+    packages.forEach(p => { sel.innerHTML += `<option value="${p.name}">${p.name}</option>`; });
+
+    function login() { auth.signInWithRedirect(new firebase.auth.GoogleAuthProvider()); }
+    function logout() { auth.signOut(); }
+
+    auth.onAuthStateChanged(user => {
+        if (user) {
+            document.getElementById('login-screen').style.display = 'none';
+            document.getElementById('main-container').style.display = 'block';
+            document.getElementById('userEmail').innerText = user.email;
+            loadData(user.uid);
+        } else {
+            document.getElementById('login-screen').style.display = 'flex';
+            document.getElementById('main-container').style.display = 'none';
+        }
+    });
+
+    function updateBuyPrice() {
+        const rate = parseFloat(document.getElementById('scRate').value) || 0;
+        const pkg = packages.find(p => p.name === sel.value);
+        if(pkg) document.getElementById('buyPrice').value = Math.round(pkg.sc * rate);
+    }
+
+    async function addRecord() {
+        const user = auth.currentUser;
+        const date = document.getElementById('saleDate').value;
+        const buy = parseFloat(document.getElementById('buyPrice').value);
+        const sell = parseFloat(document.getElementById('sellPrice').value);
+        if(!date || !sell) return alert("ဖြည့်ပါ");
+
+        await db.collection("sales").add({
+            userId: user.uid, date, pkg: sel.value, buy, sell, profit: sell - buy
+        });
+        alert("သိမ်းပြီးပါပြီ");
+    }
+
+    function loadData(uid) {
+        db.collection("sales").where("userId", "==", uid).onSnapshot(snap => {
+            let tProfit = 0, oProfit = 0, html = "";
+            const today = new Date().toISOString().split('T')[0];
+            snap.forEach(doc => {
+                const s = doc.data();
+                oProfit += s.profit;
+                if(s.date === today) tProfit += s.profit;
+                html += `<div>${s.date} - ${s.pkg}: +${s.profit} ကျပ်</div>`;
+            });
+            document.getElementById('totalProfit').innerText = tProfit;
+            document.getElementById('overallProfit').innerText = oProfit;
+            document.getElementById('tableContent').innerHTML = html;
+        });
+    }
+    document.getElementById('saleDate').valueAsDate = new Date();
+</script>
+</body>
+</html>
